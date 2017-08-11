@@ -29,16 +29,8 @@
 
 #define DRV_NAME "tri-state-key"
 
-/*
- * Original tri-state modes designed by OnePlus
- */
-
-typedef enum {
-	MODE_UNKNOWN,
-	MODE_MUTE,
-	MODE_DO_NOT_DISTURB,
-	MODE_NORMAL,
-} tri_mode_t;
+#define KEYCODE_BASE 600
+#define TOTAL_KEYCODES 6
 
 /*
  * Target key codes sending to OPPO's Keyhandler
@@ -50,16 +42,15 @@ typedef enum {
 #define KEY_MODE_PRIORITY_ONLY  602
 #define KEY_MODE_NONE           603
 
-static int current_mode = MODE_UNKNOWN;
+static int current_mode = 0;
 
 /*
  * Default mapping between OP's sti-state switch and OPPO's key codes
  * see Constants.java in device/oppo/common/configpanel
  */
-
-static int keyCode_slider_top = KEY_MODE_ALARMS_ONLY;
-static int keyCode_slider_middle = KEY_MODE_PRIORITY_ONLY;
-static int keyCode_slider_bottom = KEY_MODE_NONE;
+static int keyCode_slider_top = KEYCODE_BASE + 1;
+static int keyCode_slider_middle = KEYCODE_BASE + 2;
+static int keyCode_slider_bottom = KEYCODE_BASE + 3;
 
 struct switch_dev_data {
 	int irq_key1;
@@ -96,34 +87,31 @@ static void send_input(int keyCode)
 
 static void switch_dev_work(struct work_struct *work)
 {
-	int key1, key2, key3;
-	int mode = MODE_UNKNOWN;
 	int keyCode;
-
+	int mode;
 	mutex_lock(&sem);
 
-	key1 = gpio_get_value(switch_data->key1_gpio);
-	key2 = gpio_get_value(switch_data->key2_gpio);
-	key3 = gpio_get_value(switch_data->key3_gpio);
-
-	if (key1 == 0) {
-		mode = MODE_MUTE;
-		keyCode = keyCode_slider_top;
-	} else if (key2 == 0) {
-		mode = MODE_DO_NOT_DISTURB;
-		keyCode = keyCode_slider_middle;
-	} else if (key3 == 0) {
-		mode = MODE_NORMAL;
+	if(!gpio_get_value(switch_data->key3_gpio))
+	{
+		mode = 3;
 		keyCode = keyCode_slider_bottom;
 	}
-
-	if (current_mode != mode && mode != MODE_UNKNOWN) {
+	else if(!gpio_get_value(switch_data->key2_gpio))
+	{
+		mode = 2;
+		keyCode = keyCode_slider_middle;
+	}
+	else if(!gpio_get_value(switch_data->key1_gpio))
+	{
+		mode = 1;
+		keyCode = keyCode_slider_top;
+	}
+        if (current_mode != mode) {
 		current_mode = mode;
 		switch_set_state(&switch_data->sdev, current_mode);
 		send_input(keyCode);
-		printk(DRV_NAME " changed to mode: %d\n", switch_data->sdev.state);
+		printk("%s ,tristate set to state(%d) \n", __func__, switch_data->sdev.state);
 	}
-
 	mutex_unlock(&sem);
 }
 
@@ -186,7 +174,7 @@ switch_dev_get_devtree_pdata(struct device *dev)
 		}\
 		if (sscanf(buf, "%d", &data) != 1)\
 			return t;\
-		if (data < 600 || data > 603)\
+		if (data < KEYCODE_BASE || data >= (KEYCODE_BASE + TOTAL_KEYCODES))\
 			return t;\
 		keyCode_slider_##WHICH = data;\
 		if (current_mode == 1)\
@@ -241,6 +229,7 @@ static int tristate_dev_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct proc_dir_entry *procdir;
 	int error = 0;
+	int i;
 
 	switch_data = kzalloc(sizeof(struct switch_dev_data), GFP_KERNEL);
 	switch_data->dev = dev;
@@ -254,10 +243,8 @@ static int tristate_dev_probe(struct platform_device *pdev)
 
 	set_bit(EV_KEY, switch_data->input->evbit);
 
-	set_bit(KEY_MODE_TOTAL_SILENCE, switch_data->input->keybit);
-	set_bit(KEY_MODE_ALARMS_ONLY, switch_data->input->keybit);
-	set_bit(KEY_MODE_PRIORITY_ONLY, switch_data->input->keybit);
-	set_bit(KEY_MODE_NONE, switch_data->input->keybit);
+	for (i = KEYCODE_BASE; i < KEYCODE_BASE + TOTAL_KEYCODES; i++)
+	    set_bit(i, switch_data->input->keybit);
 
 	input_set_drvdata(switch_data->input, switch_data);
 
